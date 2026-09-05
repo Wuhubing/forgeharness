@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forgeharness"
+version = "0.1.0"
+description = "Sandboxed, stateful runtime for tool-using LLM agents (non-Docker core)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "langgraph>=0.2",
+    "mcp>=1.0",
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+include = ["forgeharness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
