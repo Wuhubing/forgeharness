@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "forgeharness"
 version = "0.1.0"
-description = "Sandboxed, stateful runtime for tool-using LLM agents (non-Docker core)."
+description = "Sandboxed, stateful runtime for tool-using LLM agents."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -18,9 +18,12 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.0"]
+# The real DockerBackend drives the `docker` CLI via subprocess (no SDK), so no
+# Python dependency is required. Install the SDK only if you prefer it.
+docker = ["docker>=6.0"]
 
 [tool.setuptools.packages.find]
-include = ["forgeharness*"]
+include = ["forgeharness*", "benchmark*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
