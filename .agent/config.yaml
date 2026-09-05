@@ -1,0 +1,15 @@
+# .agent/config.yaml — per-repo orchestration config. Commit this file.
+# Worker aliases are resolved at runtime by scripts/dispatch.py.
+# NEVER hardcode provider/model strings in skills, prompts, or logic.
+
+workers:
+  fast:          # lint/type fixes, boilerplate, unit tests, small bugs, mechanical refactor
+    provider: bigmodel
+    model: glm-4.7
+  deep:          # multi-file features, difficult debugging, repo-wide refactor
+    provider: bigmodel
+    model: glm-5.2
+
+defaults:
+  base_branch: main
+  max_attempts: 2
