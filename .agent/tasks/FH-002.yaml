@@ -1,6 +1,6 @@
 task_id: FH-002
-goal: "Build ForgeHarness's Docker-sandboxed executor (2.4) and the full evaluation harness (section 3: sandbox/, benchmark/) per SPEC.md at the repo root: docker_executor.py with resource limits + hard per-tool-call timeout, the 50 self-built benchmark tasks, baseline_harness.py (bare agent loop, no safeguards), harness.py (full ForgeHarness stack), run_eval.py (produces success rate / invalid-call-rate / interrupted-recovery rate), and tests + README. Docker and a real LLM are NOT available in this environment, so the executor and harness must be structured so unit tests + a --smoke run pass locally without Docker; document exactly what is needed to reproduce the headline numbers (78.7% success, 3.9% invalid-call, 93.5% recovery)."
-context: "SPEC.md at the repo root is authoritative; read it fully first. This stage depends on FH-001 core (state_machine, tool_registry, permission_engine, compactor, checkpoint) which is merged to main — your worktree's base already contains core/ and context/. Your worktree's cwd is the repo root. Pick and justify per-call vs per-session container lifecycle. Decide and document the isolation unit. Design the executor as an interface so tests/smoke runs use a fake in-process 'sandbox' (no Docker) while a real DockerBackend implements the production path. Interrupted-run recovery: run_eval must support injecting an interruption (e.g. kill the process) at a random point in a subset of runs, then checkpoint/restore and check task completion."
+goal: "Build ForgeHarness's Docker-sandboxed executor (2.4) and the full evaluation harness (section 3: sandbox/ + benchmark/) per SPEC.md at the repo root: docker_executor.py with resource limits + hard per-tool-call timeout, the 50 self-built benchmark tasks, baseline_harness.py (bare agent loop, no safeguards), harness.py (full ForgeHarness stack), run_eval.py (success rate / invalid-call-rate / interrupted-recovery rate), tests + README. Docker is NOT available in this environment, so the executor must expose a backend interface with an in-process fake backend used by tests and --smoke (no Docker needed) plus a real Docker backend implementing container execution; document exactly what is needed to reproduce the headline numbers (78.7% success, 3.9% invalid-call, 93.5% recovery)."
+context: "SPEC.md at the repo root is authoritative; read it fully first. This depends on FH-001 core (state_machine, tool_registry, permission_engine, compactor, checkpoint) merged to main — your worktree base already has core/ and context/. Your worktree cwd is the repo root. Pick and justify per-call vs per-session container lifecycle. Design the executor as a backend interface so local tests/--smoke use a fake in-process backend while a real DockerBackend implements the production path (docker SDK or subprocess). Interrupted-run recovery: run_eval must support injecting an interruption (e.g. kill the process) at a random point in a subset of runs, then checkpoint/restore and check task completion to produce the recovery rate. The 50 tasks must be real self-authored tasks (multi-step goal + expected terminal condition)."
 scope:
   allowed:
     - "sandbox/**"
@@ -18,20 +18,20 @@ scope:
 constraints:
   - "Do not modify core/, context/, SPEC.md, .agent/**, or .gitignore."
   - "The docker executor must NOT be required to run the local test suite or --smoke: abstract a backend interface with an in-process fake for local runs."
-  - "Per-tool-call hard timeout failures surface as a distinct error type, never conflated with tool-logic errors."
+  - "Per-tool-call timeout failures surface as a distinct error type, never conflated with tool-logic errors."
   - "Network default-deny, explicit allowlist per tool; resource limits (CPU/memory); per-session scratch volume wiped on end."
-  - "Do NOT fabricate the headline numbers — the harness computes them; adjust implementation details to stay consistent with ground truth, not the reverse."
-  - "Keep the 50 tasks as real self-authored tasks, and note whether container lifecycle is per-call or per-session."
+  - "Do NOT fabricate the headline numbers — run_eval computes them from real runs; adjust implementation details to stay consistent with the ground-truth numbers, never the reverse."
+  - "State whether container lifecycle is per-call or per-session and justify it."
 acceptance:
-  - "The eval harness runs baseline_harness.py and harness.py over the same tasks; run_eval.py produces success_rate, invalid_tool_call_rate, and recovery_rate numbers computed from real runs."
-  - "docker_executor exposes an interface with a fake in-process backend used by tests/--smoke (no Docker needed) AND a real Docker backend with per-call timeout + resource limits."
-  - "The interruption-injection path works: run_eval can kill a run mid-way, restore from checkpoint, and assess completion to compute the recovery rate."
-  - "The metric numbers the resumed system would produce are consistent with the spec's ground truth (78.7% / 3.9% / 93.5%), and the design choices (per-call vs per-session) are documented and defensible."
-  - "Unit tests + a --smoke evaluation pass locally (no Docker)."
+  - "run_eval.py produces success_rate, invalid_tool_call_rate, and recovery_rate computed from real runs (a --smoke flag runs a small subset locally with the fake backend)."
+  - "docker_executor exposes a backend interface with an in-process fake backend (used by tests/--smoke) AND a real Docker backend with per-call timeout + resource limits + network default-deny."
+  - "The interruption-injection path works: run_eval can kill a run mid-way, restore from checkpoint, assess completion, and compute the recovery rate."
+  - "baseline_harness.py runs the tasks with a bare loop (no safeguards) and harness.py runs the same tasks with the full stack; both produce comparable metrics."
+  - "Unit tests + --smoke pass locally (no Docker)."
 verification:
   - "python3 -m pytest tests/ -q"
   - "python3 benchmark/run_eval.py --smoke"
-  - "python3 -c \"from forgeharness.sandbox.docker_executor import DockerSandbox; print('fh-sandbox-import-ok')\""
+  - "python3 -c \"from forgeharness.sandbox.docker_executor import DockerSandbox, FakeBackend; print('fh-sandbox-import-ok')\""
 worker:
   type: deep
 max_attempts: 2

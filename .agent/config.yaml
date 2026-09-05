@@ -2,13 +2,16 @@
 # Worker aliases are resolved at runtime by scripts/dispatch.py.
 # NEVER hardcode provider/model strings in skills, prompts, or logic.
 
+# NOTE: GLM balance/package exhausted as of 2026-09-05 — temporarily rerouted
+# to DeepSeek. Restore glm-5.2/glm-4.7 once the GLM Coding Plan is funded.
+
 workers:
   fast:          # lint/type fixes, boilerplate, unit tests, small bugs, mechanical refactor
-    provider: bigmodel
-    model: glm-4.7
+    provider: deepseek
+    model: deepseek-v4-flash
   deep:          # multi-file features, difficult debugging, repo-wide refactor
-    provider: bigmodel
-    model: glm-5.2
+    provider: deepseek
+    model: deepseek-v4-pro
 
 defaults:
   base_branch: main
