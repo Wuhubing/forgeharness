@@ -1,0 +1,41 @@
+task_id: FH-001
+goal: "Build ForgeHarness's non-Docker core per SPEC.md at the repo root: an explicit state machine (2.1), a schema-validated tool registry (2.2), a risk-based permission engine (2.3), a context compactor (2.5), and checkpoint/restore (2.6), in the module layout of section 3 (core/ + context/), packaged as a pip-installable Python 3.11+ project using Pydantic. No Docker in this stage. Implement top-down following section 5 build order (state machine + unit tests first)."
+context: "SPEC.md at the repo root is the authoritative design; read it fully first. The 'Interview angle' notes under each component are part of the design — the code must reflect the reasons given (e.g. why an explicit FSM over an implicit loop: testability + recoverability). This is a greenfield repo: base branch main holds only SPEC.md and .agent/config.yaml. Your isolated worktree's cwd is the repo root. Python 3.11+, Pydantic and PyYAML are available. Keep every module pure-Python and unit-testable with NO network, NO Docker, and NO live LLM."
+scope:
+  allowed:
+    - "core/**"
+    - "context/**"
+    - "tests/**"
+    - "pyproject.toml"
+    - "README.md"
+  forbidden:
+    - "sandbox/**"
+    - "benchmark/**"
+    - "SPEC.md"
+    - ".agent/**"
+    - ".gitignore"
+    - ".worktrees/**"
+constraints:
+  - "Do not modify SPEC.md, .agent/**, or .gitignore."
+  - "Do NOT add a Docker dependency (sandbox is a later stage)."
+  - "Use Pydantic models / JSON Schema for tool input/output schemas."
+  - "Illegal transitions must raise a typed exception, never silently no-op. Every transition is logged with a timestamp and triggering event."
+  - "A validation failure returns a structured ToolCallError, never a raw exception string, and never calls the handler."
+  - "Checkpoint payload includes current FSM state, compacted context, any in-flight tool call (including whether it had already dispatched), and the permission/session policy in effect. Checkpoints are written only after a successful transition completes (never mid-transition)."
+  - "Name the importable top-level package forgeharness (importable from repo root)."
+  - "Include a normal unit test suite under tests/ with pytest."
+acceptance:
+  - "state_machine exposes a State enum + Transition table; an illegal transition raises a typed error; a legal transition records a timestamped event."
+  - "tool_registry.register(...) and validate_and_dispatch(...) validate the args against the input schema BEFORE calling the handler; a malformed call returns a structured ToolCallError and the handler is never invoked."
+  - "permission_engine.check(...) returns one of Allow / Deny / RequireConfirmation per RiskTier + session policy; a DESTRUCTIVE call without permission is Deny."
+  - "compactor tracks a token budget, triggers at a configurable threshold, keeps the most recent K turns verbatim, preserves any in-flight tool-call state, and logs the compaction event itself as part of state history."
+  - "checkpoint/restore: restore(checkpoint) returns a Session that can immediately continue the FSM loop, and never resumes into a half-completed transition."
+  - "The full unit test suite passes."
+verification:
+  - "python3 -m pytest tests/ -q"
+  - "python3 -c \"from forgeharness.core.state_machine import State; print('fh-core-import-ok')\""
+worker:
+  type: deep
+max_attempts: 2
+risk: high
+timeout_min: 90

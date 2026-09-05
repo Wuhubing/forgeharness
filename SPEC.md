@@ -6,7 +6,7 @@ This spec is written for handoff to a coding AI. It goes beyond "what to build" 
 
 A sandboxed, stateful runtime for tool-using LLM agents that can survive interruption, reject invalid tool calls before they execute, and gate risky actions behind explicit permission checks.
 
-Assumed stack: Python 3.11+, Docker (via `docker` SDK or subprocess), Pydantic for schema validation. Adjust if your original build used something else.
+Assumed stack: Python 3.11+, Docker (via `docker` SDK or subprocess), Pydantic for schema validation, **LangGraph** as the state machine foundation, and the **Model Context Protocol (MCP)** tool schema standard for the tool registry. Adjust if your original build used something else.
 
 ## 2. Components
 
@@ -14,27 +14,31 @@ Assumed stack: Python 3.11+, Docker (via `docker` SDK or subprocess), Pydantic f
 
 **What it does:** Tracks agent lifecycle as named states with defined transitions, instead of an implicit while-loop.
 
+**Foundation:** Build this on **LangGraph's `StateGraph`** rather than a hand-rolled transition table. LangGraph already gives you graph-based state definition, edges, and durable execution/checkpointing hooks — you don't need to reimplement graph traversal from scratch. Your original contribution is the constraint layer LangGraph doesn't enforce by default (see requirements below). Be ready to explain exactly what LangGraph gives you for free vs. what you added — that split is the actual interview-defensible part, not the graph structure itself.
+
 Suggested states: `IDLE → PLANNING → AWAITING_TOOL_CALL → EXECUTING_TOOL → PROCESSING_RESULT → (loop back to PLANNING, or) → CHECKPOINTED → DONE`, plus an `ERROR` state reachable from any state.
 
 Requirements for the AI to implement:
-- A `State` enum and a `Transition` table (dict of `{current_state: {event: next_state}}`)
-- Illegal transitions raise a typed exception rather than silently no-oping
-- Every transition is logged with a timestamp and triggering event, so a session's full state history is reconstructable
-- The state machine object is what gets checkpointed (see 2.6), not the raw conversation
+- Define these states and transitions as a LangGraph `StateGraph`, using its node/edge API rather than a custom transition table
+- Wrap LangGraph's executor so illegal transitions raise a typed exception, rather than relying on LangGraph's default (more permissive) handling
+- Every transition is logged with a timestamp and triggering event, so a session's full state history is reconstructable — LangGraph's built-in checkpointer covers part of this, but log the triggering event explicitly since that's not always captured by default
+- The state machine object (LangGraph's checkpoint, plus your transition log) is what gets checkpointed (see 2.6), not the raw conversation
 
-**Interview angle:** Be ready to explain why an explicit FSM over an implicit loop. The answer is testability (you can unit-test each transition independently) and recoverability (you can't checkpoint/restore what you can't name a state for).
+**Interview angle:** Be ready to explain why an explicit FSM over an implicit loop, and why LangGraph as the foundation rather than a from-scratch graph executor. The first answer is testability and recoverability. The second is that reimplementing graph traversal and checkpointing primitives that already exist and are well-tested doesn't demonstrate much beyond duplicating an open-source library — correctly identifying the gaps in that library (strict transition rejection, full event logging) and building precisely those gaps is the actual engineering judgment call, and it's a much stronger thing to describe in an interview than "I wrote a state machine."
 
 ### 2.2 Schema-validated tool registry
 
-**What it does:** Every tool has a registered input/output schema (Pydantic model or JSON Schema). Before a tool call executes, its arguments are validated against the schema; failures are rejected and fed back to the model as a structured error rather than executed.
+**What it does:** Every tool has a registered input/output schema. Before a tool call executes, its arguments are validated against the schema; failures are rejected and fed back to the model as a structured error rather than executed.
+
+**Foundation:** Build this on the **Model Context Protocol (MCP)** tool schema standard rather than inventing a custom schema format. MCP already defines a standard JSON-schema-based contract for tool input/output, so a registry built on it is compatible with any MCP-compliant tool server out of the box, not just your own tools. Your registry wraps MCP tool definitions with the validation-before-dispatch enforcement and rejection tracking described below — MCP defines the schema contract; your registry is what strictly enforces it and measures compliance, which the MCP spec itself doesn't mandate any particular server implement.
 
 Requirements:
-- `ToolRegistry.register(name, input_schema, output_schema, handler)`
+- `ToolRegistry.register(name, mcp_tool_schema, handler)` — accept tool definitions in MCP's schema format
 - `ToolRegistry.validate_and_dispatch(tool_call)` — validates first, only calls `handler` on success
 - On validation failure, return a structured `ToolCallError` (not a raw exception string) so the calling agent loop can decide to retry, ask for clarification, or abort
 - Track a counter of `invalid_call_count / total_call_count` — this is the metric your resume cites (9.8% → 3.9%)
 
-**Interview angle:** This is your most concretely quantifiable component (invalid-tool-call rate). Be ready to explain what "invalid" means precisely — malformed arguments, wrong types, calling a tool not in scope for the current state — and what happens to a rejected call (retry budget, fallback).
+**Interview angle:** This is your most concretely quantifiable component (invalid-tool-call rate). Be ready to explain what "invalid" means precisely — malformed arguments, wrong types, calling a tool not in scope for the current state — and what happens to a rejected call (retry budget, fallback). Also be ready to explain why MCP rather than a custom schema: it means anything you build is immediately interoperable with the broader MCP tool ecosystem, which is a concrete, checkable claim rather than a vague "extensibility" argument.
 
 ### 2.3 Risk-based permission engine
 
@@ -88,9 +92,9 @@ Requirements:
 ```
 forgeharness/
   core/
-    state_machine.py
-    tool_registry.py
-    permission_engine.py
+    state_machine.py     # thin wrapper around langgraph.StateGraph, adds strict transition enforcement
+    tool_registry.py      # wraps MCP tool schemas, adds validation-before-dispatch + rejection tracking
+    permission_engine.py  # fully custom — no standard foundation for this piece, see 2.3
     checkpoint.py
   context/
     compactor.py
@@ -105,6 +109,8 @@ forgeharness/
   README.md
 ```
 
+Key dependencies: `langgraph`, `mcp` (the Model Context Protocol SDK), `docker` SDK, `pydantic`.
+
 ## 4. Evaluation harness (to reproduce the resume's numbers)
 
 - 50 tasks, each run 3x (150 total runs) — define what a "task" looks like (a multi-step goal + expected terminal condition)
@@ -114,9 +120,9 @@ forgeharness/
 
 ## 5. Build order for the AI executor
 
-1. State machine + tests for legal/illegal transitions
-2. Tool registry + schema validation (this alone should be enough to build the invalid-call-rate metric)
-3. Permission engine
+1. Install LangGraph and MCP's Python SDK; state machine + tests for legal/illegal transitions, built as a LangGraph `StateGraph` wrapper — don't start from a blank graph implementation
+2. Tool registry + schema validation, built on MCP tool schemas (this alone should be enough to build the invalid-call-rate metric)
+3. Permission engine (fully custom, no standard foundation to build on here)
 4. Docker sandbox executor
 5. Context compactor
 6. Checkpoint/restore
@@ -129,3 +135,4 @@ forgeharness/
 - Whether container lifecycle was per-call or per-session in your original build
 - The precise definition of "invalid tool call" you used
 - What the 3 failing recovery cases actually were, if you remember specifics
+- Whether your original build already used LangGraph/MCP, or was fully custom — if it was fully custom, decide whether to rebuild on these foundations (faster, more defensible, clearer differentiation story) or keep it custom (more effort, and you'll need a good answer for "why not use LangGraph/MCP")
