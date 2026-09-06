@@ -6,7 +6,7 @@ import pytest
 
 from benchmark import baseline_harness, harness
 from benchmark.env import InMemoryEnv, evaluate_terminal
-from benchmark.tasks import ALL_TASKS, Task, plan_calls, task_by_id
+from benchmark.tasks import ALL_TASKS, Task, plan_calls, task_by_name
 from benchmark.tools import build_registry, make_handlers, schema_valid, TOOLS
 from forgeharness.sandbox.docker_executor import DockerSandbox, FakeBackend, SandboxConfig
 
@@ -33,7 +33,7 @@ def test_every_task_is_multi_step_with_terminal():
 
 
 def test_plan_calls_inserts_retries_for_invalid_steps():
-    task = task_by_id("t39")  # invalid-compute-type
+    task = task_by_name("invalid-compute-type")  # invalid-compute-type
     calls = plan_calls(task)
     assert len(calls) == 2  # malformed + corrected
     assert calls[0][1]["expression"] == ["1", "+", "1"]
@@ -88,21 +88,21 @@ def _factory(config):
 
 
 def test_full_harness_clean_task_succeeds():
-    task = task_by_id("t01")  # write-and-verify
+    task = task_by_name("write-and-verify")  # write-and-verify
     outcome = harness.run_task(task, sandbox_factory=_factory)
     assert outcome.success is True
     assert outcome.harness == "full"
 
 
 def test_baseline_clean_task_succeeds():
-    task = task_by_id("t01")
+    task = task_by_name("write-and-verify")
     outcome = baseline_harness.run_task(task)
     assert outcome.success is True
     assert outcome.harness == "baseline"
 
 
 def test_full_harness_recovers_from_invalid_args():
-    task = task_by_id("t39")  # invalid compute -> corrected
+    task = task_by_name("invalid-compute-type")  # invalid compute -> corrected
     outcome = harness.run_task(task, sandbox_factory=_factory)
     assert outcome.success is True
     assert outcome.invalid_call_count == 1
@@ -110,26 +110,26 @@ def test_full_harness_recovers_from_invalid_args():
 
 
 def test_baseline_fails_on_invalid_args():
-    task = task_by_id("t39")
+    task = task_by_name("invalid-compute-type")
     outcome = baseline_harness.run_task(task)
     assert outcome.success is False
     assert outcome.invalid_call_count == 1
 
 
 def test_full_harness_denies_destructive_trap():
-    task = task_by_id("t45")  # destructive-trap-1
+    task = task_by_name("destructive-trap-1")  # destructive-trap-1
     outcome = harness.run_task(task, sandbox_factory=_factory)
     assert outcome.success is True  # file preserved -> safe terminal met
 
 
 def test_baseline_executes_destructive_trap():
-    task = task_by_id("t45")
+    task = task_by_name("destructive-trap-1")
     outcome = baseline_harness.run_task(task)
     assert outcome.success is False  # file deleted -> unsafe
 
 
 def test_full_harness_times_out_runaway_command():
-    task = task_by_id("t48")  # timeout-sleep
+    task = task_by_name("timeout-sleep")  # timeout-sleep
     outcome = harness.run_task(task, sandbox_factory=_factory)
     # SPEC 2.4: a hard per-call timeout surfaces as a DISTINCT error type, and
     # the task's terminal expects exactly that — so a safeguarded harness
@@ -139,7 +139,7 @@ def test_full_harness_times_out_runaway_command():
 
 
 def test_full_harness_network_trap_denied():
-    task = task_by_id("t47")  # network-trap
+    task = task_by_name("network-trap")  # network-trap
     outcome = harness.run_task(task, sandbox_factory=_factory)
     assert outcome.success is True
 
@@ -148,7 +148,7 @@ def test_full_harness_network_trap_denied():
 
 
 def test_interruption_recovery_file_task_survives_mid_dispatch():
-    task = task_by_id("t01")  # write + read (filesystem terminal)
+    task = task_by_name("write-and-verify")  # write + read (filesystem terminal)
     outcome = harness.run_task(task, sandbox_factory=_factory, interrupt_at=4)
     assert outcome.interrupted is True
     assert outcome.recovered is True
@@ -156,21 +156,21 @@ def test_interruption_recovery_file_task_survives_mid_dispatch():
 
 
 def test_interruption_recovery_before_dispatch():
-    task = task_by_id("t02")  # write-append-verify
+    task = task_by_name("write-append-verify")  # write-append-verify
     outcome = harness.run_task(task, sandbox_factory=_factory, interrupt_at=2)
     assert outcome.interrupted is True
     assert outcome.recovered is True
 
 
 def test_interruption_recovery_compute_mid_dispatch_loses_result():
-    task = task_by_id("t05")  # arithmetic-sum (result terminal)
+    task = task_by_name("arithmetic-sum")  # arithmetic-sum (result terminal)
     outcome = harness.run_task(task, sandbox_factory=_factory, interrupt_at=4)
     assert outcome.interrupted is True
     assert outcome.recovered is False
 
 
 def test_checkpoint_payload_used_for_restore():
-    task = task_by_id("t01")
+    task = task_by_name("write-and-verify")
     # An interrupted run leaves no partial in-memory session behind; recovery
     # rebuilds from the last durable checkpoint. Verified via run_task return.
     outcome = harness.run_task(task, sandbox_factory=_factory, interrupt_at=3)
@@ -180,7 +180,7 @@ def test_checkpoint_payload_used_for_restore():
 
 def test_full_and_baseline_produce_comparable_metrics():
     # same task set -> both harnesses yield RunOutcome with metrics
-    task = task_by_id("t39")
+    task = task_by_name("invalid-compute-type")
     full = harness.run_task(task, sandbox_factory=_factory)
     base = baseline_harness.run_task(task)
     assert full.harness != base.harness

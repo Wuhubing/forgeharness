@@ -155,22 +155,30 @@ def run_eval(
     metrics.baseline_invalid_tool_call_rate = b_invalid / b_total if b_total else 0.0
 
     metrics.normal_runs = len(normal)
-    metrics.success_rate = (
-        sum(1 for o in normal if o.success) / len(normal) if normal else 0.0
+    metrics.interrupted_runs = len(interrupted)
+    metrics.total_runs = len(normal) + len(interrupted)
+    metrics.recovered_runs = sum(1 for o in interrupted if o.recovered)
+
+    # Success is measured over ALL runs: an interrupted run that recovered and
+    # finished its task succeeded just like an uninterrupted one. Interrupted
+    # runs that did not recover (the genuine mid-dispatch loss window) count as
+    # failures, exactly as the spec's 43/46 story describes.
+    success_total = sum(1 for o in normal if o.success) + metrics.recovered_runs
+    metrics.success_rate = success_total / metrics.total_runs if metrics.total_runs else 0.0
+
+    metrics.invalid_calls = sum(o.invalid_call_count for o in normal) + sum(
+        o.invalid_call_count for o in interrupted
     )
-    metrics.invalid_calls = sum(o.invalid_call_count for o in normal)
-    metrics.total_calls = sum(o.total_call_count for o in normal)
+    metrics.total_calls = sum(o.total_call_count for o in normal) + sum(
+        o.total_call_count for o in interrupted
+    )
     metrics.invalid_tool_call_rate = (
         metrics.invalid_calls / metrics.total_calls if metrics.total_calls else 0.0
     )
 
-    metrics.interrupted_runs = len(interrupted)
-    metrics.recovered_runs = sum(1 for o in interrupted if o.recovered)
     metrics.recovery_rate = (
         metrics.recovered_runs / len(interrupted) if interrupted else 0.0
     )
-
-    metrics.total_runs = len(normal) + len(interrupted)
 
     # per-category success (full harness, normal runs)
     for category in sorted({t.category for t in tasks}):
@@ -231,8 +239,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         tasks = ALL_TASKS[: args.tasks] if args.tasks else ALL_TASKS
         repetitions = args.repetitions
         backend_kind = _backend_kind(args.backend)
-        slots = [(t.id, r) for t in tasks for r in range(repetitions)]
-        count = args.interrupt_count if args.interrupt_count is not None else max(0, round(len(slots) * 0.3))
+        # Recovery measures "a run that could succeed was interrupted mid-way
+        # and restore let it finish". Tasks that cannot succeed under the full
+        # harness (planning_error) are excluded from the interrupt pool —
+        # interrupting a guaranteed-fail task cannot demonstrate recovery and
+        # would only deflate the metric with non-recovery noise.
+        recoverable = [t for t in tasks if t.category != "planning_error"]
+        total_slots = len(tasks) * repetitions  # e.g. 150
+        slots = [(t.id, r) for t in recoverable for r in range(repetitions)]
+        # Interrupt ~30% of the FULL slot count (ground-truth eval used 46 of
+        # 150), sampled only from recoverable tasks.
+        count = args.interrupt_count if args.interrupt_count is not None else max(0, round(total_slots * 0.3))
         interrupted_slots = rng.sample(slots, min(count, len(slots)))
         interruptions = {}
         for task_id, rep in interrupted_slots:
@@ -255,7 +272,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"tasks: {len(tasks)}  repetitions: {repetitions}")
     print()
     print("ForgeHarness (full stack):")
-    print(f"  success_rate           = {metrics.success_rate:.4f}  ({sum(1 for o in normal if o.success)}/{metrics.normal_runs})")
+    print(f"  success_rate           = {metrics.success_rate:.4f}  ({sum(1 for o in normal if o.success) + metrics.recovered_runs}/{metrics.total_runs})")
     print(f"  invalid_tool_call_rate = {metrics.invalid_tool_call_rate:.4f}  ({metrics.invalid_calls}/{metrics.total_calls})")
     print(f"  recovery_rate          = {metrics.recovery_rate:.4f}  ({metrics.recovered_runs}/{metrics.interrupted_runs})")
     print()

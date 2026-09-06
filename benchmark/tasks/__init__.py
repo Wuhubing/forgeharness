@@ -170,6 +170,7 @@ _CLEAN = [
         [compute("2**10")],
         result_equals(1024),
     ),
+
     (
         "roundtrip-file",
         "write then read back a multi-line document verbatim",
@@ -185,24 +186,9 @@ _CLEAN = [
          append("/workspace/events.log", "end\n")],
         file_contains("/workspace/events.log", "end"),
     ),
-    (
-        "min-max",
-        "compute min and max of a small sequence and verify the max",
-        [compute("max([3, 7, 2, 9, 5])")],
-        result_equals(9),
-    ),
-    (
-        "sorted-list",
-        "compute the sorted order of a sequence and verify the first element",
-        [compute("sorted([5, 1, 4, 2, 3])[0]")],
-        result_equals(1),
-    ),
-    (
-        "string-length",
-        "compute the length of a string and verify it",
-        [compute("len('forgeharness')")],
-        result_equals(12),
-    ),
+
+
+
     (
         "three-files",
         "create three numbered files and verify the third exists",
@@ -228,12 +214,7 @@ _CLEAN = [
          write("/workspace/l0/l1/l2/deep.txt", "x")],
         file_exists("/workspace/l0/l1/l2/deep.txt"),
     ),
-    (
-        "numeric-pipeline",
-        "compute (a+b)*c and verify the result",
-        [compute("(10 + 5) * 3")],
-        result_equals(45),
-    ),
+
     (
         "file-in-directory-list",
         "place a file in a directory and verify it appears in the listing",
@@ -242,12 +223,7 @@ _CLEAN = [
          ls("/workspace/check")],
         file_contains("/workspace/check/item.txt", "present"),
     ),
-    (
-        "modulo",
-        "compute 17 mod 5 and verify 2",
-        [compute("17 % 5")],
-        result_equals(2),
-    ),
+
     (
         "append-then-read-back",
         "append to a fresh file and confirm the content is exactly the appended text",
@@ -263,24 +239,9 @@ _CLEAN = [
          read("/workspace/lines.txt")],
         file_contains("/workspace/lines.txt", "c"),
     ),
-    (
-        "absolute-difference",
-        "compute abs of a negative number and verify the result",
-        [compute("abs(0 - 42)")],
-        result_equals(42),
-    ),
-    (
-        "rounding",
-        "compute round(2.7) and verify 3",
-        [compute("round(2.7)")],
-        result_equals(3),
-    ),
-    (
-        "sum-of-squares",
-        "compute 3^2 + 4^2 and verify 25",
-        [compute("3**2 + 4**2")],
-        result_equals(25),
-    ),
+
+
+
     (
         "write-empty-dir-file",
         "create a directory and write a file with an empty string, verify it exists",
@@ -297,18 +258,8 @@ _CLEAN = [
          append("/workspace/acc.txt", "C")],
         file_contains("/workspace/acc.txt", "ABC"),
     ),
-    (
-        "large-sum",
-        "compute a larger arithmetic sum and verify the total",
-        [compute("sum(range(1, 101))")],
-        result_equals(5050),
-    ),
-    (
-        "division",
-        "compute integer division of 100 by 7 and verify 14",
-        [compute("100 // 7")],
-        result_equals(14),
-    ),
+
+
     (
         "file-with-numbers",
         "write a data file and verify a specific token",
@@ -477,6 +428,66 @@ _TIMEOUT = [
 
 _PLANNING = [
     (
+        "min-max-plan",
+        "compute the max of a sequence but the plan takes the min, so the answer is wrong",
+        [compute("min([3, 7, 2, 9, 5])")],
+        result_equals(9),
+    ),
+    (
+        "sorted-list-plan",
+        "return the first element of a sorted list but the plan takes the last, so the answer is wrong",
+        [compute("sorted([5, 1, 4, 2, 3])[-1]")],
+        result_equals(1),
+    ),
+    (
+        "string-length-plan",
+        "compute the length of a string but the plan drops a character, so the answer is wrong",
+        [compute("len(forgeharness)")],
+        result_equals(12),
+    ),
+    (
+        "numeric-pipeline-plan",
+        "compute (a+b)*c but the plan applies precedence wrongly, so the answer is wrong",
+        [compute("10 + 5 * 3")],
+        result_equals(45),
+    ),
+    (
+        "modulo-plan",
+        "compute 17 mod 5 but the plan uses division, so the answer is wrong",
+        [compute("17 / 5")],
+        result_equals(2),
+    ),
+    (
+        "absolute-difference-plan",
+        "compute |0-42| but the plan forgets abs, so the answer is wrong",
+        [compute("0 - 42")],
+        result_equals(42),
+    ),
+    (
+        "rounding-plan",
+        "compute round(2.7) but the plan truncates with int, so the answer is wrong",
+        [compute("int(2.7)")],
+        result_equals(3),
+    ),
+    (
+        "sum-of-squares-plan",
+        "compute 3^2+4^2 but the plan mis-groups, so the answer is wrong",
+        [compute("(3 + 4) ** 2")],
+        result_equals(25),
+    ),
+    (
+        "large-sum-plan",
+        "compute sum(1..100) but the plan stops at 99, so the answer is wrong",
+        [compute("sum(range(1, 100))")],
+        result_equals(5050),
+    ),
+    (
+        "division-plan",
+        "compute integer division 100//7 but the plan uses float division, so the answer is wrong",
+        [compute("100 / 7")],
+        result_equals(14),
+    ),
+    (
         "planning-error-sum",
         "sum 1..5 but the plan misses the final term, so the answer is wrong",
         [compute("1 + 2 + 3 + 4")],
@@ -517,6 +528,13 @@ def task_by_id(task_id: str) -> Task:
         if task.id == task_id:
             return task
     raise KeyError(task_id)
+
+
+def task_by_name(name: str) -> Task:
+    for task in ALL_TASKS:
+        if task.name == name:
+            return task
+    raise KeyError(name)
 
 
 def plan_calls(task: Task) -> list[tuple[str, dict[str, Any]]]:
