@@ -210,6 +210,11 @@ class Session:
         session.compactor._turns = [Turn.model_validate(t) for t in checkpoint.compacted_context]
         session.compactor.compaction_log = list(checkpoint.compaction_log)
 
+        # Completed tool-call results must survive a restore: the evaluator
+        # grades the terminal condition against them, so losing them after an
+        # interrupted-run restore would misreport a finished task as failed.
+        session.results = [dict(r) for r in checkpoint.completed_results]
+
         if checkpoint.in_flight_tool_call is not None:
             inflight = InFlightToolCall.model_validate(checkpoint.in_flight_tool_call)
             session.in_flight_tool_call = inflight

@@ -55,6 +55,7 @@ class Checkpoint(BaseModel):
     compaction_log: list[CompactionEvent] = Field(default_factory=list)
     in_flight_tool_call: Optional[InFlightToolCall] = None
     session_policy: SessionPolicy = Field(default_factory=SessionPolicy)
+    completed_results: list[dict[str, Any]] = Field(default_factory=list)
     token_budget: int = 1000
     trigger_ratio: float = 0.8
     keep_last: int = 3
@@ -87,6 +88,7 @@ class CheckpointManager:
                 else None
             ),
             session_policy=SessionPolicy.model_validate(session.policy),
+            completed_results=[dict(r) for r in session.results],
             token_budget=session.compactor.token_budget,
             trigger_ratio=session.compactor.trigger_ratio,
             keep_last=session.compactor.keep_last,

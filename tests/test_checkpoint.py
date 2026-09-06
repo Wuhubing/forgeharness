@@ -123,7 +123,9 @@ def test_restore_continues_loop_and_reaches_done():
 
     final = restored.run()
     assert final is State.DONE
-    assert [r["name"] for r in restored.results] == ["double"]
+    # Completed results survive restore: `add` finished before the checkpoint,
+    # `double` runs after restore. Both must be present and in order.
+    assert [r["name"] for r in restored.results] == ["add", "double"]
     assert calls == [(1, 2)]  # the already-completed tool was not re-run
 
 
@@ -168,6 +170,40 @@ def test_in_flight_not_dispatched_is_reenqueued():
     final = restored.run()
     assert final is State.DONE
     assert calls == [(1, 2)]
+    assert restored.results[0]["output"] == 3
+
+
+def test_restore_preserves_completed_results_for_evaluation():
+    """Interrupted-run restore must keep completed tool results (regression:
+    the evaluator grades the terminal against session.results, so losing them
+    after restore misreported a finished task as unrecovered)."""
+    registry = _registry()
+    calls = []
+    registry.register(
+        "add",
+        Tool(
+            name="add",
+            inputSchema={
+                "type": "object",
+                "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                "required": ["a", "b"],
+            },
+        ),
+        lambda a, b: calls.append((a, b)) or a + b,
+        risk_tier=RiskTier.READ_ONLY,
+    )
+
+    session = Session(registry=registry, tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})])
+    session.run()
+    assert session.fsm.current_state is State.DONE
+    assert [r["name"] for r in session.results] == ["add"]
+
+    checkpoint = session.checkpoint()
+    assert [r["name"] for r in checkpoint.completed_results] == ["add"]
+    assert checkpoint.completed_results[0]["output"] == 3
+
+    restored = Session.restore(checkpoint)
+    assert [r["name"] for r in restored.results] == ["add"]
     assert restored.results[0]["output"] == 3
 
 
