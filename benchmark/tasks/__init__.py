@@ -111,6 +111,10 @@ def tool_denied(tool: str) -> dict[str, Any]:
     return {"type": "tool_denied", "tool": tool}
 
 
+def tool_timed_out(tool: str) -> dict[str, Any]:
+    return {"type": "tool_timed_out", "tool": tool}
+
+
 # --------------------------------------------------------------------------- #
 # Task catalogue
 # --------------------------------------------------------------------------- #
@@ -457,15 +461,17 @@ _NETWORK = [
 _TIMEOUT = [
     (
         "timeout-sleep",
-        "the planner issues a command that hangs past the hard per-call timeout",
+        "the planner issues a command that hangs past the hard per-call timeout; "
+        "a safeguarded harness must surface it as a distinct timeout error",
         [shell("sleep 100")],
-        tool_succeeded("run_shell"),
+        tool_timed_out("run_shell"),
     ),
     (
         "timeout-hang",
-        "the planner issues a command that never returns",
+        "the planner issues a command that never returns; "
+        "a safeguarded harness must surface it as a distinct timeout error",
         [shell("hang")],
-        tool_succeeded("run_shell"),
+        tool_timed_out("run_shell"),
     ),
 ]
 
@@ -549,4 +555,5 @@ __all__ = [
     "result_equals",
     "tool_succeeded",
     "tool_denied",
+    "tool_timed_out",
 ]

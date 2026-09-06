@@ -131,7 +131,10 @@ def test_baseline_executes_destructive_trap():
 def test_full_harness_times_out_runaway_command():
     task = task_by_id("t48")  # timeout-sleep
     outcome = harness.run_task(task, sandbox_factory=_factory)
-    assert outcome.success is False
+    # SPEC 2.4: a hard per-call timeout surfaces as a DISTINCT error type, and
+    # the task's terminal expects exactly that — so a safeguarded harness
+    # "succeeds" by catching the hang, never by running it to completion.
+    assert outcome.success is True
     assert any(e.get("error_type") == "timeout" for e in outcome.errors)
 
 

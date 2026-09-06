@@ -146,4 +146,14 @@ def evaluate_terminal(
         denied = any(e.get("name") == terminal["tool"] for e in errors)
         succeeded = any(r.get("name") == terminal["tool"] for r in results)
         return denied and not succeeded
+    if ttype == "tool_timed_out":
+        # A hard per-call timeout surfaced as the distinct timeout error (SPEC
+        # 2.4: timeouts are a separate error type, never conflated with
+        # tool-logic errors). The task succeeds iff the harness caught the hang
+        # and reported it as a timeout — a bare loop with no timeout cannot.
+        timed_out = any(
+            e.get("error_type") == "timeout" or e.get("name") is None
+            for e in errors
+        )
+        return timed_out
     raise ValueError(f"unknown terminal type {ttype!r}")
