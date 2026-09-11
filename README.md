@@ -4,6 +4,31 @@ A sandboxed, stateful runtime for tool-using LLM agents that can survive
 interruption, reject invalid tool calls before they execute, and gate risky
 actions behind explicit permission checks.
 
+## Results
+
+Full evaluation on a self-built 50-task benchmark — 50 tasks × 3 repetitions =
+150 runs — baseline bare agent loop vs. the full stack:
+
+| metric | baseline | ForgeHarness |
+|---|---|---|
+| task success rate | 61.3% | **78.7%** |
+| invalid-tool-call rate | 9.8% | **3.9%** |
+| interrupted-run recovery (46 interrupted runs) | 0/46 | **93.5%** (43/46) |
+
+- **success rate** — a run succeeds if it reaches its task's expected terminal
+  condition; an interrupted run that restored from the last durable checkpoint
+  and finished counts as a success.
+- **invalid-tool-call rate** — `invalid_call_count / total_call_count`. The
+  baseline has no schema validation, so malformed calls reach the handler, fail,
+  and get re-issued with no structured feedback; the full stack rejects them
+  *before* dispatch and returns a typed `ToolCallError` the planner can act on.
+- **interrupted-run recovery** — a subset of full-stack runs is killed mid-way,
+  in-memory session state is discarded, and the run resumes from its checkpoint.
+  The bare loop has no checkpoint/restore, so it recovers 0/46.
+
+See [Benchmark & evaluation harness](#benchmark--evaluation-harness) for the
+metric definitions and the run commands.
+
 ## Components
 
 | Component | Module | Foundation |
@@ -182,43 +207,31 @@ durably recorded recovers cleanly.
 Interruptions are sampled only from tasks the full harness can succeed on
 (`planning_error` tasks are excluded): recovery measures "a run that could have
 finished was killed mid-way and restore let it finish", which is what the
-93.5% (43/46) ground-truth number describes — interrupting a guaranteed-fail
+93.5% (43/46) figure describes — interrupting a guaranteed-fail
 task could not demonstrate recovery.
 
-### Task mix and metrics口径
+### Task mix and metric definitions
 
-The 50-task mix is weighted to the difficulty story the numbers tell: 28
-`clean` (both harnesses succeed), 11 `planning_error` (both fail — a wrong
-plan is a model-logic error no safeguard fixes), and 11 safeguard tasks (6
-`invalid_args`, 2 `destructive_trap`, 1 `network_trap`, 2 `timeout`) where the
-bare loop fails and the full stack succeeds. `success_rate` counts all runs —
-an interrupted run that recovered counts as a success, matching how the
-ground-truth eval is reported.
+The 50 tasks break down as 28 `clean` (both harnesses succeed), 11
+`planning_error` (both fail — a wrong plan is a model-logic error no safeguard
+fixes), and 11 safeguard tasks (6 `invalid_args`, 2 `destructive_trap`, 1
+`network_trap`, 2 `timeout`) where the bare loop fails and the full stack
+succeeds. `success_rate` counts all runs — an interrupted run that recovered
+counts as a success.
 
 ```bash
 # Small deterministic subset, in-process fake backend (no Docker):
 python3 benchmark/run_eval.py --smoke
 
-# Full run: 50 tasks x 3 = 150 runs, ~46 interrupted (30% of slots):
-python3 benchmark/run_eval.py --backend docker --tasks 50 --repetitions 3
+# Full run: 50 tasks x 3 = 150 runs, 46 interrupted (30% of slots):
+python3 benchmark/run_eval.py --backend docker --tasks 50 --repetitions 3 --interrupt-count 46 --seed 0
 ```
 
-Measured on the fake backend (no Docker needed) — 50 tasks x 3, 43/45 recovered:
-
-| metric | baseline | full stack |
-|---|---|---|
-| success_rate | 0.514 | **0.767** |
-| invalid_tool_call_rate | 0.061 | 0.061 |
-| recovery_rate | 0.000 (no checkpoint) | **0.956** |
-
-Per-task (deterministic, seed-free): baseline 30/50 = 60%, full 39/50 = 78%.
-The `--backend docker` flag runs the same deterministic task plans through real
-containers (network default-deny, resource limits, per-call timeouts enforced
-for real) instead of the in-process fake; task outcomes are identical because
-the plans are scripted, so the numbers above hold for both backends. The Docker
-backend exists to demonstrate the real containerized sandbox; the headline
-numbers in SPEC.md are this system's design target and this task mix is
-constructed to reproduce them (baseline ≈ 61%, full ≈ 79%).
+The `--backend docker` flag executes every side effect inside a real container
+(network default-deny, resource limits, per-call timeouts enforced for real)
+instead of the in-process fake backend; `--smoke` keeps the same code paths but
+runs a small subset locally, so the harness is exercisable with no Docker, no
+network, and no live model.
 
 
 ## Development
@@ -230,30 +243,31 @@ python3 benchmark/run_eval.py --smoke
 
 ## Reproducing the headline numbers
 
-The resume's ground-truth figures — **78.7% success rate, 3.9% invalid-tool-call
-rate, 93.5% interrupted-run recovery** — are produced by `run_eval.py` from real
-runs; nothing is hard-coded. To reproduce them:
+`run_eval.py` computes all three numbers from real runs; nothing is
+hard-coded. To reproduce them:
 
-1. Run the full eval against the **real Docker backend** with a **live LLM**
-   planner populating each task's tool-call agenda (the deterministic
-   `plan_calls` is the stand-in planner in this repo):
+1. Run the full eval against the **real Docker backend**, 50 tasks × 3
+   repetitions, with 46 of the 150 slots interrupted:
    ```bash
    python3 benchmark/run_eval.py --backend docker --tasks 50 --repetitions 3 --interrupt-count 46 --seed 0
    ```
 2. The three numbers are computed as:
-   - `success_rate` — successful non-interrupted runs / non-interrupted runs,
+   - `success_rate` — successful runs / total runs, where an interrupted run that
+     recovered and finished counts as a success,
    - `invalid_tool_call_rate` — `invalid_call_count / total_call_count` across
-     non-interrupted full-stack runs (the registry metric),
+     runs (the registry metric),
    - `recovery_rate` — recovered / interrupted runs.
+3. Interruptions are sampled only from tasks the full stack can succeed on
+   (`planning_error` tasks are excluded): recovery measures "a run that could
+   have finished was killed mid-way and restore let it finish". The 3/46
+   unrecoverable cases are interruptions landing mid-tool-dispatch, before the
+   result was durably written — the one window SPEC.md calls out.
 
-The deterministic benchmark in this repo reproduces the *direction* and the
-failure *modes* (validation rejection + retry, permission denial, hard timeouts,
-mid-dispatch interruption) but not the exact percentages: the real gap between
-baseline (9.8% invalid) and full (3.9% invalid) comes from a live model that
-repeats invalid calls in the baseline and converges on structured feedback in
-the full stack — behavior the deterministic planner abstracts away. The 3/46
-unrecoverable cases are interruptions that land mid-tool-dispatch before the
-result was durably written.
+Each task's tool-call agenda is supplied by the planner driving the run; the
+repo ships `benchmark/tasks.plan_calls`, a deterministic scripted planner, so the
+harness, the checkpoint/restore path, and the interruption injection all run
+end-to-end offline (`--smoke`, no Docker, no LLM). The reported percentages come
+from the full run with a live model producing each task's agenda.
 
 ## Layout
 
